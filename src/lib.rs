@@ -56,7 +56,11 @@ struct State {
 fn sync() -> PyResult<()> {
     dotenv().ok();
     let url = std::env::var("BASE_URL").expect("BASE_URL must be set");
-    get_all_pagination(url);
+    let num_workers = std::env::var("NUM_WORKERS")
+        .expect("NUM_WORKERS must be set")
+        .parse()
+        .expect("NUM_WORKERS must be a number");
+    get_all_pagination(url, num_workers);
     Ok(())
 }
 
@@ -67,10 +71,10 @@ fn app(_py: Python, m: &PyModule) -> PyResult<()> {
     Ok(())
 }
 
-fn get_all_pagination(base_url: String) {
+fn get_all_pagination(base_url: String, num_workers: usize) {
     let meta = trigger_pagination(&base_url);
 
-    let worker_threads_count = 8;
+    let worker_threads_count = num_workers;
     let pool = ThreadPool::new(worker_threads_count);
     let total_pages = meta.total_pages;
     let state = Arc::new(State {
