@@ -116,7 +116,6 @@ pub struct CompleteMessage {
 #[derive(Serialize, Debug, Deserialize)]
 /// The update that the client sees.
 pub struct ClientPutUpdate {
-    pub uuid: String,
     pub author: String,
     pub message: String,
     pub likes: i32,
@@ -125,8 +124,9 @@ pub struct ClientPutUpdate {
 
 #[derive(Serialize, Debug, Deserialize)]
 pub struct PutDeleteUpdate {
+    uuid: String,
     put: Option<ClientPutUpdate>,
-    delete: Option<String>,
+    delete: bool,
 }
 
 #[derive(Serialize, Debug, Deserialize)]
@@ -149,22 +149,16 @@ fn get_page_and_process(state: Arc<State>) {
         PaginationType::Cache => {
             let res: MutationResults = res.json().unwrap();
 
-            // create a new file called `cached_posts.csv` if it doesn't exist
-            // check if the `results.csv` file exists
+            // check if this is the second run by checking if a file from the previous run exists, demo flow specific
             let first_sync = !Path::new(state.result_csv_name).exists();
-            let file_name = if first_sync {
-                // first time syncing
-                state.result_csv_name
-            } else {
-                state.cached_posts_csv_name
-            };
-            write_posts_csv(file_name, res.posts, &state);
-
             if first_sync {
-                // rename the file to `results.csv`
-                std::fs::rename(file_name, state.result_csv_name).unwrap();
+                // first time syncing
+                // from the flow of the demo, we are certain that there are only `post` cache updates
+                write_posts_csv(state.result_csv_name, res.posts, &state);
                 return;
-            }
+            } else {
+                write_posts_csv(state.cached_posts_csv_name, res.posts, &state);
+            };
 
             if !res.puts_deletes.is_empty() {
                 let cache_num;
@@ -248,6 +242,7 @@ fn merge(state: &Arc<State>) {
     // open the `cached_posts.csv` file
     let mut cached_posts_reader = BufReader::new(
         OpenOptions::new()
+            // .create(true)
             .read(true)
             .open(state.cached_posts_csv_name)
             .unwrap(),
@@ -261,13 +256,9 @@ fn merge(state: &Arc<State>) {
 
     loop {
         // read a line from the `results.csv` file
-        let result_line = match read_result.take() {
-            Some(l) => Some(l),
-            None => {
-                let l = results_reader.next();
-                l.map(|l| l.unwrap())
-            }
-        };
+        let result_line = read_result
+            .take()
+            .or(results_reader.next().map(|l| l.unwrap()));
         let Some(mut result_line) = result_line else {
             break;
         };
@@ -290,47 +281,35 @@ fn merge(state: &Arc<State>) {
                     }
                 }
             }
-            // apply put update here
+            // apply update here
             if let Some(update) = puts_deletes.pop_front() {
-                let mut used_update = false;
-                if let Some(put) = &update.put {
-                    if put.uuid == result_line.split(',').next().unwrap() {
+                if update.uuid == result_line.split(',').next().unwrap() {
+                    if update.delete {
+                        mark_result_line_for_deletion = update.delete;
+                    } else if let Some(put) = update.put {
                         let mut line_splits: Vec<String> =
                             result_line.split(',').map(|s| s.to_string()).collect();
-                        // TODO: refactor this, it's a lot of copies
-                        line_splits[1] = put.author.to_string();
-                        line_splits[2] = put.message.to_string();
-                        let likes_binding = put.likes.to_string();
-                        line_splits[3] = likes_binding;
-                        if let Some(image) = &put.image {
-                            line_splits[4] = image.to_string();
+                        line_splits[1] = put.author;
+                        line_splits[2] = put.message;
+                        line_splits[3] = put.likes.to_string();
+                        if let Some(image) = put.image {
+                            line_splits[4] = image;
                         }
                         // rejoin the line
                         result_line = line_splits.join(",");
-                        used_update = true;
                     }
-                }
-                if let Some(delete) = &update.delete {
-                    if delete == result_line.split(',').next().unwrap() {
-                        mark_result_line_for_deletion = true;
-                        used_update = true;
-                    }
-                }
-                if !used_update {
+                } else {
                     puts_deletes.push_front(update);
                 }
             }
         }
 
-        let cached_post_line = match read_cached_post.take() {
-            Some(l) => Some(l),
-            None => {
-                let l = cached_posts_reader.next();
-                l.map(|l| l.unwrap())
-            }
-        };
+        let cached_post_line = read_cached_post
+            .take()
+            .or(cached_posts_reader.next().map(|l| l.unwrap()));
         let Some(cached_post_line) = cached_post_line else {
             writeln!(final_writer, "{}", result_line).unwrap();
+            // TODO: If there are mutation updates left keep applying it to the results before break here
             break;
         };
 
