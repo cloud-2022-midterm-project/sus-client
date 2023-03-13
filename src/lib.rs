@@ -300,13 +300,15 @@ fn merge(state: &Arc<State>) {
 
     loop {
         // read a line from the `results.csv` file
-        let Some(mut result_line) = read_result
-            .take()
-            .or(results_reader.next().map(|l| l.unwrap()))
-        else {
-            // There is no more result line to read.
-            // No need for further comparisons (merging) in this loop
-            break;
+        let mut result_line = match read_result.take() {
+            Some(l) => l,
+            None => match results_reader.next() {
+                Some(l) => l.unwrap(),
+                None => {
+                    dbg!("break here 1");
+                    break;
+                }
+            },
         };
 
         let mark_result_line_for_deletion = update_post_line_with_put_delete(
@@ -316,17 +318,20 @@ fn merge(state: &Arc<State>) {
             &mut result_line,
         );
 
-        let Some(cached_post_line) = read_cached_post
-            .take()
-            .or(cached_posts_reader.next().map(|l| l.unwrap()))
-        else {
-            // There is no more cached post line to read, so we should write the result line (if not marked for deletion)
-            // and break out of the loop to write the remaining `result_line` lines
+        let cached_post_line = match read_cached_post.take() {
+            Some(l) => l,
+            None => match cached_posts_reader.next() {
+                Some(l) => l.unwrap(),
+                None => {
+                    // There is no more cached post line to read, so we should write the result line (if not marked for deletion)
+                    // and break out of the loop to write the remaining `result_line` lines
 
-            if !mark_result_line_for_deletion {
-                writeln!(final_writer, "{}", result_line).unwrap();
-            }
-            break;
+                    if !mark_result_line_for_deletion {
+                        writeln!(final_writer, "{}", result_line).unwrap();
+                    }
+                    break;
+                }
+            },
         };
 
         // check to see what should be written to the final file first
