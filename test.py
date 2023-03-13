@@ -128,7 +128,8 @@ flow_1 = [
     ({"uuid": ids[2]}, 'delete', 204),
 ]
 checkpoint_1 = \
-    """00000000-0000-0000-0000-000000000000,author 0,new message 0,0,image 0
+    """
+00000000-0000-0000-0000-000000000000,author 0,new message 0,0,image 0
 11111111-1111-1111-1111-111111111111,author 1,new message 1,1,
 44444444-4444-4444-4444-444444444444,author 4,message 4,4,image4
 55555555-5555-5555-5555-555555555555,author 5,message 5,0,image 5
@@ -180,7 +181,8 @@ flow_2 = [
     ({"uuid": ids[1]}, 'delete', 204),
 ]
 checkpoint_2 = \
-    """00000000-0000-0000-0000-000000000000,author 0,new new message 0,0,new image 0
+    """
+00000000-0000-0000-0000-000000000000,author 0,new new message 0,0,new image 0
 33333333-3333-3333-3333-333333333333,author 3,message 3,3,
 44444444-4444-4444-4444-444444444444,author 4,new message 4,4,image4
 55555555-5555-5555-5555-555555555555,author 5,message 5,0,image 5
@@ -221,7 +223,8 @@ flow_3 = [
 ]
 
 checkpoint_3 = \
-    """00000000-0000-0000-0000-000000000000,author 0,new new message 0,0,image 0 flow 3
+    """
+00000000-0000-0000-0000-000000000000,author 0,new new message 0,0,image 0 flow 3
 33333333-3333-3333-3333-333333333333,author 3,message 3 flow 3,0,image 3 flow 3
 44444444-4444-4444-4444-444444444444,author 4,message 4 flow 3,0,image 4 flow 3
 55555555-5555-5555-5555-555555555555,author 5,message 5,0,image 5
@@ -270,7 +273,8 @@ flow_4 = [
 ]
 
 checkpoint_4 = \
-    """00000000-0000-0000-0000-000000000000,author 0,new new message 0,0,image 0 flow 4
+    """
+00000000-0000-0000-0000-000000000000,author 0,new new message 0,0,image 0 flow 4
 11111111-1111-1111-1111-111111111111,author 1,message 1 flow 4,100,image 1 flow 4
 33333333-3333-3333-3333-333333333333,author 3,message 3 flow 4,0,image 3 flow 4
 44444444-4444-4444-4444-444444444444,author 4,message 4 flow 4,0,image 4 flow 4
