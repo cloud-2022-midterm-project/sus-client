@@ -4,6 +4,7 @@ import os
 import requests
 from clear_db import clear
 import app
+from remove_non_results_files import remove_non_results_files
 
 
 def wait(prompt="Press any key to continue..."):
@@ -302,13 +303,11 @@ def main():
 def tests(base_url, flows):
     for i, flow in enumerate(flows, 1):
         send_flow(base_url, flow)
-        app.sync()
-        # check if cache_posts exist
-        if os.path.exists("cached_posts.csv"):
-            os.remove("cached_posts.csv")
 
-        for file in glob.glob('cached_mutations_*'):
-            os.remove(file)
+        app.sync()
+
+        remove_non_results_files()
+
         if i != len(flows):
             wait(
                 f'Checkpoint {i} reached, check result, press any key to continue...')
