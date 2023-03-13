@@ -96,8 +96,8 @@ fn get_all_pagination(base_url: String, num_workers: usize) {
 }
 
 fn trigger_pagination(url: &str) -> PaginationMetadata {
-    let r = reqwest::blocking::get(url).unwrap().bytes().unwrap();
-    bincode::deserialize(&r).unwrap()
+    let body_bytes = reqwest::blocking::get(url).unwrap().bytes().unwrap();
+    bincode::deserialize(&body_bytes).unwrap()
 }
 
 #[derive(Serialize, Debug, Deserialize)]
@@ -148,16 +148,21 @@ pub struct MutationResults {
 
 fn get_page_and_process(state: Arc<State>) {
     let client = reqwest::blocking::Client::new();
-    let res = client.get(&state.get_page_url).send().unwrap();
+    let body_bytes = client
+        .get(&state.get_page_url)
+        .send()
+        .unwrap()
+        .bytes()
+        .unwrap();
     drop(client);
 
     match state.meta.kind {
         PaginationType::Fresh => {
-            let response_json: Vec<CompleteMessage> = res.json().unwrap();
-            write_posts_csv(state.result_csv_name, response_json, &state);
+            let res: Vec<CompleteMessage> = bincode::deserialize(&body_bytes).unwrap();
+            write_posts_csv(state.result_csv_name, res, &state);
         }
         PaginationType::Cache => {
-            let res: MutationResults = res.json().unwrap();
+            let res: MutationResults = bincode::deserialize(&body_bytes).unwrap();
 
             // check if this is the second run by checking if a file from the previous run exists, demo flow specific
             let first_sync = !Path::new(state.result_csv_name).exists();
