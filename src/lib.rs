@@ -33,16 +33,16 @@ fn app(_py: Python, m: &PyModule) -> PyResult<()> {
     Ok(())
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct PaginationMetadata {
     total_pages: usize,
     kind: PaginationType,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 enum PaginationType {
-    Fresh,
     Cache,
+    Fresh,
 }
 
 impl FromStr for PaginationType {
@@ -96,8 +96,8 @@ fn get_all_pagination(base_url: String, num_workers: usize) {
 }
 
 fn trigger_pagination(url: &str) -> PaginationMetadata {
-    let r = reqwest::blocking::get(url).unwrap();
-    r.json().unwrap()
+    let r = reqwest::blocking::get(url).unwrap().bytes().unwrap();
+    bincode::deserialize(&r).unwrap()
 }
 
 #[derive(Serialize, Debug, Deserialize)]
