@@ -198,7 +198,7 @@ fn get_page_and_process(state: Arc<State>, first_sync: bool, total_pages: usize)
             if *pages_fetched == total_pages {
                 merge_posts(&state, RESULT_CSV_NAME);
             }
-            println!("page {} done", res.page_number);
+            println!("{}/{}", *pages_fetched, total_pages);
         }
         PaginationType::Cache => {
             let res: MutationResults = bincode::deserialize(&body_bytes).unwrap();
@@ -212,7 +212,7 @@ fn get_page_and_process(state: Arc<State>, first_sync: bool, total_pages: usize)
             write_posts_csv(&post_file_name, res.posts);
             let mut pages_fetched = state.pages_fetched.lock().unwrap();
             *pages_fetched += 1;
-            println!("page {} done", res.page_number);
+            println!("{}/{}", *pages_fetched, total_pages);
 
             if first_sync && *pages_fetched == total_pages {
                 // first time syncing
