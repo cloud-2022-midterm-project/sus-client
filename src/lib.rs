@@ -174,12 +174,17 @@ fn merge_posts(state: &Arc<State>, to: &str) {
 
 fn get_page_and_process(state: Arc<State>, first_sync: bool, total_pages: usize) {
     let client = reqwest::blocking::Client::new();
-    let res = client.get(&state.get_page_url).send().unwrap();
+    let body_bytes = client
+        .get(&state.get_page_url)
+        .send()
+        .unwrap()
+        .bytes()
+        .unwrap();
     drop(client);
 
     match state.meta.kind {
         PaginationType::Fresh => {
-            let res: DbResults = res.json().unwrap();
+            let res: DbResults = bincode::deserialize(&body_bytes).unwrap();
 
             let post_file_name = post_file_name(res.page_number);
             state
@@ -196,7 +201,7 @@ fn get_page_and_process(state: Arc<State>, first_sync: bool, total_pages: usize)
             println!("page {} done", res.page_number);
         }
         PaginationType::Cache => {
-            let res: MutationResults = res.json().unwrap();
+            let res: MutationResults = bincode::deserialize(&body_bytes).unwrap();
 
             let post_file_name = post_file_name(res.page_number);
             state
