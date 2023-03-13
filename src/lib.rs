@@ -1,5 +1,9 @@
 #![allow(let_underscore_lock)]
 
+use dotenv::dotenv;
+use pyo3::prelude::*;
+use serde::{ser::Error, Deserialize, Deserializer, Serialize, Serializer};
+use std::io::Write;
 use std::{
     collections::VecDeque,
     fs::OpenOptions,
@@ -8,13 +12,26 @@ use std::{
     str::FromStr,
     sync::{Arc, Mutex},
 };
-
-use dotenv::dotenv;
-use pyo3::prelude::*;
-
-use serde::{ser::Error, Deserialize, Deserializer, Serialize, Serializer};
-use std::io::Write;
 use threadpool::ThreadPool;
+
+/// This is the main function that is called from the Python client.
+#[pyfunction]
+fn sync() -> PyResult<()> {
+    dotenv().ok();
+    let url = std::env::var("BASE_URL").expect("BASE_URL must be set");
+    let num_workers = std::env::var("NUM_WORKERS")
+        .expect("NUM_WORKERS must be set")
+        .parse()
+        .expect("NUM_WORKERS must be a number");
+    get_all_pagination(url, num_workers);
+    Ok(())
+}
+
+#[pymodule]
+fn app(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(sync, m)?)?;
+    Ok(())
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct PaginationMetadata {
@@ -51,31 +68,9 @@ struct State {
     cached_posts_csv_name: &'static str,
 }
 
-/// Formats the sum of two numbers as string.
-#[pyfunction]
-fn sync() -> PyResult<()> {
-    dotenv().ok();
-    let url = std::env::var("BASE_URL").expect("BASE_URL must be set");
-    let num_workers = std::env::var("NUM_WORKERS")
-        .expect("NUM_WORKERS must be set")
-        .parse()
-        .expect("NUM_WORKERS must be a number");
-    get_all_pagination(url, num_workers);
-    Ok(())
-}
-
-/// A Python module implemented in Rust.
-#[pymodule]
-fn app(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(sync, m)?)?;
-    Ok(())
-}
-
 fn get_all_pagination(base_url: String, num_workers: usize) {
     let meta = trigger_pagination(&base_url);
 
-    let worker_threads_count = num_workers;
-    let pool = ThreadPool::new(worker_threads_count);
     let total_pages = meta.total_pages;
     let state = Arc::new(State {
         cache_number: Mutex::new(0),
@@ -88,6 +83,7 @@ fn get_all_pagination(base_url: String, num_workers: usize) {
         cached_posts_csv_name: "cached_posts.csv",
     });
 
+    let pool = ThreadPool::new(num_workers);
     for _ in 0..total_pages {
         let s = state.clone();
         pool.execute(move || {
