@@ -193,12 +193,14 @@ fn get_page_and_process(state: Arc<State>, first_sync: bool, total_pages: usize)
                 .unwrap()
                 .insert(post_file_name.clone());
             write_posts_csv(&post_file_name, res.messages);
+
             let mut pages_fetched = state.pages_fetched.lock().unwrap();
             *pages_fetched += 1;
+            println!("{}/{}", *pages_fetched, total_pages);
+
             if *pages_fetched == total_pages {
                 merge_posts(&state, RESULT_CSV_NAME);
             }
-            println!("{}/{}", *pages_fetched, total_pages);
         }
         PaginationType::Cache => {
             let res: MutationResults = bincode::deserialize(&body_bytes).unwrap();
@@ -210,6 +212,7 @@ fn get_page_and_process(state: Arc<State>, first_sync: bool, total_pages: usize)
                 .unwrap()
                 .insert(post_file_name.clone());
             write_posts_csv(&post_file_name, res.posts);
+
             let mut pages_fetched = state.pages_fetched.lock().unwrap();
             *pages_fetched += 1;
             println!("{}/{}", *pages_fetched, total_pages);
@@ -270,6 +273,7 @@ fn write_posts_csv(file_name: &str, posts: Vec<CompleteMessage>) {
 }
 
 fn merge(state: &Arc<State>) {
+    println!("Merging results...");
     let merge_file_name = "merge.csv";
 
     // create a new filed called `final.csv` even if it exists
