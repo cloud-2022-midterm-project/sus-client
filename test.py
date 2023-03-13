@@ -25,6 +25,9 @@ ids = {
     2: "22222222-2222-2222-2222-222222222222",
     3: '33333333-3333-3333-3333-333333333333',
     4: '44444444-4444-4444-4444-444444444444',
+    5: '55555555-5555-5555-5555-555555555555',
+    6: '66666666-6666-6666-6666-666666666666',
+    7: '77777777-7777-7777-7777-777777777777',
 }
 
 flow_1 = [
@@ -61,7 +64,22 @@ flow_1 = [
         "imageUpdate": True,
         "image": 'image 0'
     }, 'post', 201),
-
+    ({
+        "uuid": ids[5],
+        "author": "author 5",
+        "message": "message 5",
+        "likes": 0,
+        "imageUpdate": True,
+        "image": 'image 5'
+    }, 'post', 201),
+    ({
+        "uuid": ids[6],
+        "author": "author 6",
+        "message": "message 6",
+        "likes": 0,
+        "imageUpdate": True,
+        "image": 'image 6'
+    }, 'post', 201),
     # not found update
     ({
         "uuid": 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
@@ -111,7 +129,10 @@ flow_1 = [
 checkpoint_1 = \
     """00000000-0000-0000-0000-000000000000,author 0,new message 0,0,image 0
 11111111-1111-1111-1111-111111111111,author 1,new message 1,1,
-44444444-4444-4444-4444-444444444444,author 4,message 4,4,image4"""
+44444444-4444-4444-4444-444444444444,author 4,message 4,4,image4
+55555555-5555-5555-5555-555555555555,author 5,message 5,0,image 5
+66666666-6666-6666-6666-666666666666,author 6,message 6,0,image 6
+"""
 
 flow_2 = [
     # add new message
@@ -160,7 +181,99 @@ flow_2 = [
 checkpoint_2 = \
     """00000000-0000-0000-0000-000000000000,author 0,new new message 0,0,new image 0
 33333333-3333-3333-3333-333333333333,author 3,message 3,3,
-44444444-4444-4444-4444-444444444444,author 4,new message 4,4,image4"""
+44444444-4444-4444-4444-444444444444,author 4,new message 4,4,image4
+55555555-5555-5555-5555-555555555555,author 5,message 5,0,image 5
+66666666-6666-6666-6666-666666666666,author 6,message 6,0,image 6
+
+"""
+
+flow_3 = [
+    # flow3: cached posts are all added to final csv
+    # left with results and put to do
+    # update image of 0
+    ({
+        "uuid": ids[0],
+        "imageUpdate": True,
+        "image": 'image 0 flow 3',
+        "author": "author 0",
+        "message": "new new message 0",
+        "likes": 0,
+    }, 'put', 204),
+    # update image and message of 3
+    ({
+        "uuid": ids[3],
+        "imageUpdate": True,
+        "image": 'image 3 flow 3',
+        "author": "author 3",
+        "message": "message 3 flow 3",
+        "likes": 0,
+    }, 'put', 204),
+    # update image and message of 4
+    ({
+        "uuid": ids[4],
+        "imageUpdate": True,
+        "image": 'image 4 flow 3',
+        "author": "author 4",
+        "message": "message 4 flow 3",
+        "likes": 0,
+    }, 'put', 204),
+]
+
+checkpoint_3 = \
+    """00000000-0000-0000-0000-000000000000,author 0,new new message 0,0,image 0 flow 3
+33333333-3333-3333-3333-333333333333,author 3,message 3 flow 3,0,image 3 flow 3
+44444444-4444-4444-4444-444444444444,author 4,message 4 flow 3,0,image 4 flow 3
+55555555-5555-5555-5555-555555555555,author 5,message 5,0,image 5
+66666666-6666-6666-6666-666666666666,author 6,message 6,0,image 6
+"""
+
+flow_4 = [
+    # flow3: cached posts are all added to final csv
+    # left with results and put to do
+    # add 3 new messages (cached posts)
+    ({
+        "uuid": ids[1],
+        "author": "author 1",
+        "message": "message 1 flow 4",
+        "likes": 100,
+        "imageUpdate": True,
+        "image": "image 1 flow 4"
+    }, 'post', 201),
+    # update image of 0
+    ({
+        "uuid": ids[0],
+        "imageUpdate": True,
+        "image": 'image 0 flow 4',
+        "author": "author 0",
+        "message": "new new message 0",
+        "likes": 0,
+    }, 'put', 204),
+    # update image and message of 3
+    ({
+        "uuid": ids[3],
+        "imageUpdate": True,
+        "image": 'image 3 flow 4',
+        "author": "author 3",
+        "message": "message 3 flow 4",
+        "likes": 0,
+    }, 'put', 204),
+    # update image and message of 4
+    ({
+        "uuid": ids[4],
+        "imageUpdate": True,
+        "image": 'image 4 flow 4',
+        "author": "author 4",
+        "message": "message 4 flow 4",
+        "likes": 0,
+    }, 'put', 204),
+]
+
+checkpoint_4 = \
+    """00000000-0000-0000-0000-000000000000,author 0,new new message 0,0,image 0 flow 4
+11111111-1111-1111-1111-111111111111,author 1,message 1 flow 4,100,image 1 flow 4
+33333333-3333-3333-3333-333333333333,author 3,message 3 flow 4,0,image 3 flow 4
+66666666-6666-6666-6666-666666666666,author 6,message 6,0,image 6
+"""
 
 
 def main():
@@ -182,13 +295,20 @@ def main():
         os.remove(file)
     print('Done')
 
-    tests(base_url, [flow_1, flow_2])
+    # tests(base_url, [flow_1, flow_2, flow_3])
+    tests(base_url, [flow_1, flow_2, flow_3, flow_4])
 
 
 def tests(base_url, flows):
     for i, flow in enumerate(flows, 1):
         send_flow(base_url, flow)
         app.sync()
+        # check if cache_posts exist
+        if os.path.exists("cached_posts.csv"):
+            os.remove("cached_posts.csv")
+
+        for file in glob.glob('cached_mutations_*'):
+            os.remove(file)
         if i != len(flows):
             wait(
                 f'Checkpoint {i} reached, check result, press any key to continue...')
