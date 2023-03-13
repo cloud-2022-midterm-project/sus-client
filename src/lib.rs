@@ -3,11 +3,10 @@
 use dotenv::dotenv;
 use pyo3::prelude::*;
 use serde::{ser::Error, Deserialize, Deserializer, Serialize, Serializer};
-use std::io::Write;
 use std::{
     collections::VecDeque,
-    fs::OpenOptions,
-    io::{BufRead, BufReader, BufWriter},
+    fs::{File, OpenOptions},
+    io::{BufRead, BufReader, BufWriter, Write},
     path::Path,
     str::FromStr,
     sync::{Arc, Mutex},
@@ -57,6 +56,12 @@ impl FromStr for PaginationType {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct DbResults {
+    pub page_number: usize,
+    pub messages: Vec<CompleteMessage>,
+}
+
 struct State {
     cache_number: Mutex<usize>,
     pages_fetched: Mutex<usize>,
@@ -82,12 +87,13 @@ fn get_all_pagination(base_url: String, num_workers: usize) {
         result_csv_name: "results.csv",
         cached_posts_csv_name: "cached_posts.csv",
     });
+    let first_sync = !Path::new(state.result_csv_name).exists();
 
     let pool = ThreadPool::new(num_workers);
     for _ in 0..total_pages {
         let s = state.clone();
         pool.execute(move || {
-            get_page_and_process(s);
+            get_page_and_process(s, first_sync, total_pages);
         });
     }
 
@@ -144,31 +150,72 @@ pub struct MutationResults {
     pub posts: Vec<CompleteMessage>,
     pub puts_deletes: Vec<PutDeleteUpdate>,
     pub done: bool,
+    pub page_number: usize,
 }
 
-fn get_page_and_process(state: Arc<State>) {
+fn post_file_name(n: usize) -> String {
+    format!("posts_{n}.csv")
+}
+
+fn merge_posts(total_post_files: usize, to: &str) {
+    let mut writer = BufWriter::new(
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(to)
+            .unwrap(),
+    );
+    for order in 0..total_post_files {
+        let file_name = post_file_name(order);
+        let mut post = BufReader::new(File::open(file_name).unwrap()).lines();
+        while let Some(line) = post.next().map(|l| l.unwrap()) {
+            writeln!(writer, "{}", line).unwrap();
+        }
+    }
+}
+
+fn get_page_and_process(state: Arc<State>, first_sync: bool, total_pages: usize) {
     let client = reqwest::blocking::Client::new();
     let res = client.get(&state.get_page_url).send().unwrap();
     drop(client);
 
     match state.meta.kind {
         PaginationType::Fresh => {
-            let response_json: Vec<CompleteMessage> = res.json().unwrap();
-            write_posts_csv(state.result_csv_name, response_json, &state);
+            // let response_json: Vec<CompleteMessage> = res.json().unwrap();
+            let text = res.text().unwrap();
+            let res: DbResults = serde_json::from_str(&text).unwrap_or_else(|e| {
+                std::fs::write("error.txt", &text).unwrap();
+                panic!("error: {}", e)
+            });
+            write_posts_csv(&post_file_name(res.page_number), res.messages, &state);
+            let mut pages_fetched = state.pages_fetched.lock().unwrap();
+            *pages_fetched += 1;
+            if *pages_fetched == total_pages {
+                merge_posts(total_pages, &state.result_csv_name);
+            }
+            println!("page {} done", res.page_number);
         }
         PaginationType::Cache => {
-            let res: MutationResults = res.json().unwrap();
+            let text = res.text().unwrap();
+            let res: MutationResults = serde_json::from_str(&text).unwrap_or_else(|e| {
+                std::fs::write("error.txt", &text).unwrap();
+                panic!("error: {}", e)
+            });
 
-            // check if this is the second run by checking if a file from the previous run exists, demo flow specific
-            let first_sync = !Path::new(state.result_csv_name).exists();
-            if first_sync {
+            write_posts_csv(&post_file_name(res.page_number), res.posts, &state);
+            let mut pages_fetched = state.pages_fetched.lock().unwrap();
+            *pages_fetched += 1;
+            println!("page {} done", res.page_number);
+
+            if first_sync && *pages_fetched == total_pages {
                 // first time syncing
                 // from the flow of the demo, we are certain that there are only `post` cache updates
-                write_posts_csv(state.result_csv_name, res.posts, &state);
+                merge_posts(total_pages, &state.result_csv_name);
                 return;
-            } else {
-                write_posts_csv(state.cached_posts_csv_name, res.posts, &state);
-            };
+            }
+
+            // drop the lock first
+            drop(pages_fetched);
 
             if !res.puts_deletes.is_empty() {
                 let cache_num;
@@ -186,9 +233,8 @@ fn get_page_and_process(state: Arc<State>) {
                 std::fs::write(file_name, encoded).unwrap();
             }
 
-            let mut pages_fetched = state.pages_fetched.lock().unwrap();
-            *pages_fetched += 1;
-            if *pages_fetched == state.meta.total_pages {
+            if *state.pages_fetched.lock().unwrap() == state.meta.total_pages {
+                merge_posts(total_pages, &state.cached_posts_csv_name);
                 merge(&state);
             }
         }
