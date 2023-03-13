@@ -4,7 +4,7 @@ use dotenv::dotenv;
 use pyo3::prelude::*;
 use serde::{ser::Error, Deserialize, Deserializer, Serialize, Serializer};
 use std::{
-    collections::VecDeque,
+    collections::{BTreeSet, VecDeque},
     fs::{File, OpenOptions},
     io::{BufRead, BufReader, BufWriter, Write},
     path::Path,
@@ -68,10 +68,10 @@ struct State {
     get_page_url: String,
     meta: PaginationMetadata,
     cache_number_list: Mutex<VecDeque<usize>>,
-    writing_fresh: Mutex<()>,
-    result_csv_name: &'static str,
-    cached_posts_csv_name: &'static str,
+    posts_file_names: Mutex<BTreeSet<String>>,
 }
+
+const RESULT_CSV_NAME: &str = "results.csv";
 
 fn get_all_pagination(base_url: String, num_workers: usize) {
     let meta = trigger_pagination(&base_url);
@@ -83,11 +83,9 @@ fn get_all_pagination(base_url: String, num_workers: usize) {
         get_page_url: format!("{base_url}/get-page"),
         meta,
         cache_number_list: Mutex::new(VecDeque::with_capacity(total_pages)),
-        writing_fresh: Mutex::new(()),
-        result_csv_name: "results.csv",
-        cached_posts_csv_name: "cached_posts.csv",
+        posts_file_names: Mutex::new(BTreeSet::new()),
     });
-    let first_sync = !Path::new(state.result_csv_name).exists();
+    let first_sync = !Path::new(RESULT_CSV_NAME).exists();
 
     let pool = ThreadPool::new(num_workers);
     for _ in 0..total_pages {
@@ -157,7 +155,7 @@ fn post_file_name(n: usize) -> String {
     format!("posts_{n}.csv")
 }
 
-fn merge_posts(total_post_files: usize, to: &str) {
+fn merge_posts(state: &Arc<State>, to: &str) {
     let mut writer = BufWriter::new(
         OpenOptions::new()
             .write(true)
@@ -165,8 +163,8 @@ fn merge_posts(total_post_files: usize, to: &str) {
             .open(to)
             .unwrap(),
     );
-    for order in 0..total_post_files {
-        let file_name = post_file_name(order);
+    let mut file_names = state.posts_file_names.lock().unwrap();
+    while let Some(file_name) = file_names.pop_first() {
         let mut post = BufReader::new(File::open(file_name).unwrap()).lines();
         while let Some(line) = post.next().map(|l| l.unwrap()) {
             writeln!(writer, "{}", line).unwrap();
@@ -181,28 +179,32 @@ fn get_page_and_process(state: Arc<State>, first_sync: bool, total_pages: usize)
 
     match state.meta.kind {
         PaginationType::Fresh => {
-            // let response_json: Vec<CompleteMessage> = res.json().unwrap();
-            let text = res.text().unwrap();
-            let res: DbResults = serde_json::from_str(&text).unwrap_or_else(|e| {
-                std::fs::write("error.txt", &text).unwrap();
-                panic!("error: {}", e)
-            });
-            write_posts_csv(&post_file_name(res.page_number), res.messages, &state);
+            let res: DbResults = res.json().unwrap();
+
+            let post_file_name = post_file_name(res.page_number);
+            state
+                .posts_file_names
+                .lock()
+                .unwrap()
+                .insert(post_file_name.clone());
+            write_posts_csv(&post_file_name, res.messages);
             let mut pages_fetched = state.pages_fetched.lock().unwrap();
             *pages_fetched += 1;
             if *pages_fetched == total_pages {
-                merge_posts(total_pages, &state.result_csv_name);
+                merge_posts(&state, RESULT_CSV_NAME);
             }
             println!("page {} done", res.page_number);
         }
         PaginationType::Cache => {
-            let text = res.text().unwrap();
-            let res: MutationResults = serde_json::from_str(&text).unwrap_or_else(|e| {
-                std::fs::write("error.txt", &text).unwrap();
-                panic!("error: {}", e)
-            });
+            let res: MutationResults = res.json().unwrap();
 
-            write_posts_csv(&post_file_name(res.page_number), res.posts, &state);
+            let post_file_name = post_file_name(res.page_number);
+            state
+                .posts_file_names
+                .lock()
+                .unwrap()
+                .insert(post_file_name.clone());
+            write_posts_csv(&post_file_name, res.posts);
             let mut pages_fetched = state.pages_fetched.lock().unwrap();
             *pages_fetched += 1;
             println!("page {} done", res.page_number);
@@ -210,7 +212,7 @@ fn get_page_and_process(state: Arc<State>, first_sync: bool, total_pages: usize)
             if first_sync && *pages_fetched == total_pages {
                 // first time syncing
                 // from the flow of the demo, we are certain that there are only `post` cache updates
-                merge_posts(total_pages, &state.result_csv_name);
+                merge_posts(&state, RESULT_CSV_NAME);
                 return;
             }
 
@@ -234,7 +236,6 @@ fn get_page_and_process(state: Arc<State>, first_sync: bool, total_pages: usize)
             }
 
             if *state.pages_fetched.lock().unwrap() == state.meta.total_pages {
-                merge_posts(total_pages, &state.cached_posts_csv_name);
                 merge(&state);
             }
         }
@@ -246,8 +247,7 @@ fn put_delete_file_name(num: usize) -> String {
     file_name
 }
 
-fn write_posts_csv(file_name: &str, posts: Vec<CompleteMessage>, state: &Arc<State>) {
-    let _ = state.writing_fresh.lock().unwrap();
+fn write_posts_csv(file_name: &str, posts: Vec<CompleteMessage>) {
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -276,84 +276,112 @@ fn merge(state: &Arc<State>) {
             .unwrap(),
     );
     // open the `results.csv` file
-    let mut results_reader = BufReader::new(
-        OpenOptions::new()
-            .read(true)
-            .open(state.result_csv_name)
-            .unwrap(),
-    )
-    .lines();
-    // open the `cached_posts.csv` file
-    // this file here always exists because we created it with `write_posts_csv` before this function is called
-    let mut cached_posts_reader = BufReader::new(
-        OpenOptions::new()
-            .read(true)
-            .open(state.cached_posts_csv_name)
-            .unwrap(),
-    )
-    .lines();
+    let mut results_reader =
+        BufReader::new(OpenOptions::new().read(true).open(RESULT_CSV_NAME).unwrap()).lines();
 
     let mut read_result: Option<String> = None;
     let mut read_cached_post: Option<String> = None;
     let mut puts_deletes = VecDeque::new();
     let mut should_update_results = !state.cache_number_list.lock().unwrap().is_empty();
 
-    loop {
-        // read a line from the `results.csv` file
-        let mut result_line = match read_result.take() {
-            Some(l) => l,
-            None => match results_reader.next() {
-                Some(l) => l.unwrap(),
-                None => {
-                    dbg!("break here 1");
-                    break;
-                }
-            },
-        };
+    // check if we we have any cached post updates that we need to merge with the old result lines
+    // if not we can just skip the main merge loop entirely
+    let mut cached_post_file_names = state.posts_file_names.lock().unwrap();
+    let cached_post_file_name = cached_post_file_names.pop_first();
+    if let Some(cached_file_name) = cached_post_file_name {
+        // we have at least one cached post update
+        let mut cached_posts_reader = BufReader::new(
+            OpenOptions::new()
+                .read(true)
+                .open(cached_file_name)
+                .unwrap(),
+        )
+        .lines();
 
-        let mark_result_line_for_deletion = update_post_line_with_put_delete(
-            &mut should_update_results,
-            &mut puts_deletes,
-            state,
-            &mut result_line,
-        );
-
-        let cached_post_line = match read_cached_post.take() {
-            Some(l) => l,
-            None => match cached_posts_reader.next() {
-                Some(l) => l.unwrap(),
-                None => {
-                    // There is no more cached post line to read, so we should write the result line (if not marked for deletion)
-                    // and break out of the loop to write the remaining `result_line` lines
-
-                    if !mark_result_line_for_deletion {
-                        writeln!(final_writer, "{}", result_line).unwrap();
+        loop {
+            // read a line from the `results.csv` file
+            let mut result_line = match read_result.take() {
+                Some(l) => l,
+                None => match results_reader.next() {
+                    Some(l) => l.unwrap(),
+                    None => {
+                        break;
                     }
-                    break;
-                }
-            },
-        };
+                },
+            };
 
-        // check to see what should be written to the final file first
-        if result_line.split(',').next().unwrap() < cached_post_line.split(',').next().unwrap() {
-            // should write the result line
-            read_cached_post = Some(cached_post_line);
-            if mark_result_line_for_deletion {
-                continue;
+            let mark_result_line_for_deletion = update_post_line_with_put_delete(
+                &mut should_update_results,
+                &mut puts_deletes,
+                state,
+                &mut result_line,
+            );
+
+            let cached_post_line = match read_cached_post.take() {
+                Some(l) => l,
+                None => match cached_posts_reader.next() {
+                    Some(l) => l.unwrap(),
+                    None => {
+                        // we have reached the end of this current cached post file
+                        // load the next post cached file
+                        match cached_post_file_names.pop_first() {
+                            Some(file_name) => {
+                                // we still have more post cached file to load
+                                cached_posts_reader = BufReader::new(
+                                    OpenOptions::new().read(true).open(file_name).unwrap(),
+                                )
+                                .lines();
+                                // read the first line of the new cached post file
+                                match cached_posts_reader.next() {
+                                    Some(l) => l.unwrap(),
+                                    None => {
+                                        // somehow this file doesn't have any lines
+                                        break;
+                                    }
+                                }
+                            }
+                            None => {
+                                // There is no more post cached file to read, so we should write the result line (if not marked for deletion)
+                                // and break out of the loop to write the remaining `result_line` lines
+                                if !mark_result_line_for_deletion {
+                                    writeln!(final_writer, "{}", result_line).unwrap();
+                                }
+                                break;
+                            }
+                        }
+                    }
+                },
+            };
+
+            // check to see what should be written to the final file first in this iteration
+            if result_line.split(',').next().unwrap() < cached_post_line.split(',').next().unwrap()
+            {
+                // we should write the result line
+                if !mark_result_line_for_deletion {
+                    writeln!(final_writer, "{}", result_line).unwrap();
+                }
+                // save the cached post line for the next iteration
+                read_cached_post = Some(cached_post_line);
+            } else {
+                // we should write the cached post line
+                writeln!(final_writer, "{}", cached_post_line).unwrap();
+                // save the result line for the next iteration if it is not marked for deletion by the put update
+                if !mark_result_line_for_deletion {
+                    read_result = Some(result_line);
+                }
             }
-            writeln!(final_writer, "{}", result_line).unwrap();
-        } else {
-            // should write the cached post line
-            writeln!(final_writer, "{}", cached_post_line).unwrap();
-            if mark_result_line_for_deletion {
-                continue;
-            }
-            read_result = Some(result_line);
+        }
+
+        // write the remaining cached post lines if there are any
+        if let Some(l) = read_cached_post {
+            writeln!(final_writer, "{}", l).unwrap();
+        }
+        for line in cached_posts_reader {
+            writeln!(final_writer, "{}", line.unwrap()).unwrap();
         }
     }
 
-    // write the remaining lines
-
+    // write the remaining old result lines if there are any
     if let Some(mut result_line) = read_result.take() {
         let mark_result_line_for_deletion = update_post_line_with_put_delete(
             &mut should_update_results,
@@ -378,15 +406,8 @@ fn merge(state: &Arc<State>) {
         }
     }
 
-    if let Some(l) = read_cached_post {
-        writeln!(final_writer, "{}", l).unwrap();
-    }
-    for line in cached_posts_reader {
-        writeln!(final_writer, "{}", line.unwrap()).unwrap();
-    }
-
     // replace `results.csv` with `merged.csv`
-    std::fs::rename(merge_file_name, state.result_csv_name).unwrap();
+    std::fs::rename(merge_file_name, RESULT_CSV_NAME).unwrap();
 }
 
 /// Update the passed in `result_line` by mutating it if there is a put update for it.
