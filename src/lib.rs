@@ -113,6 +113,20 @@ pub struct CompleteMessage {
     pub image: Option<String>,
 }
 
+impl CompleteMessage {
+    fn into_csv_row(self) -> String {
+        let row = format!(
+            "{},{},{},{},{}",
+            self.uuid,
+            self.author,
+            self.message,
+            self.likes,
+            self.image.unwrap_or("".to_string())
+        );
+        row
+    }
+}
+
 #[derive(Serialize, Debug, Deserialize)]
 /// The update that the client sees.
 pub struct ClientPutUpdate {
@@ -200,24 +214,12 @@ fn write_posts_csv(file_name: &str, posts: Vec<CompleteMessage>, state: &Arc<Sta
     // append to the file
     for post in posts {
         // each csv row is this format: uuid,message,author,likes,image
-        let row = get_csv_row(post);
+        let row = post.into_csv_row();
         // write the row to the file
         writeln!(file, "{}", row).unwrap();
     }
     // flush the file
     file.flush().unwrap();
-}
-
-fn get_csv_row(post: CompleteMessage) -> String {
-    let row = format!(
-        "{},{},{},{},{}",
-        post.uuid,
-        post.author,
-        post.message,
-        post.likes,
-        post.image.unwrap_or("".to_string())
-    );
-    row
 }
 
 fn merge(state: &Arc<State>) {
