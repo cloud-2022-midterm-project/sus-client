@@ -242,9 +242,9 @@ fn merge(state: &Arc<State>) {
     )
     .lines();
     // open the `cached_posts.csv` file
+    // this file here always exists because we created it with `write_posts_csv` before this function is called
     let mut cached_posts_reader = BufReader::new(
         OpenOptions::new()
-            // .create(true)
             .read(true)
             .open(state.cached_posts_csv_name)
             .unwrap(),
@@ -258,60 +258,32 @@ fn merge(state: &Arc<State>) {
 
     loop {
         // read a line from the `results.csv` file
-        let result_line = read_result
+        let Some(mut result_line) = read_result
             .take()
-            .or(results_reader.next().map(|l| l.unwrap()));
-        let Some(mut result_line) = result_line else {
+            .or(results_reader.next().map(|l| l.unwrap()))
+        else {
+            // There is no more result line to read.
+            // No need for further comparisons (merging) in this loop
             break;
         };
 
-        let mut mark_result_line_for_deletion = false;
+        let mark_result_line_for_deletion = update_post_line_with_put_delete(
+            &mut should_update_results,
+            &mut puts_deletes,
+            state,
+            &mut result_line,
+        );
 
-        if should_update_results {
-            if puts_deletes.is_empty() {
-                // load puts and deletes file
-                match state.cache_number_list.lock().unwrap().pop_front() {
-                    Some(n) => {
-                        let file_name = put_delete_file_name(n);
-                        let file = std::fs::File::open(file_name).unwrap();
-                        let content: Vec<PutDeleteUpdate> =
-                            bincode::deserialize_from(file).unwrap();
-                        puts_deletes.extend(content);
-                    }
-                    None => {
-                        should_update_results = false;
-                    }
-                }
-            }
-            // apply update here
-            if let Some(update) = puts_deletes.pop_front() {
-                if update.uuid == result_line.split(',').next().unwrap() {
-                    if update.delete {
-                        mark_result_line_for_deletion = update.delete;
-                    } else if let Some(put) = update.put {
-                        let mut line_splits: Vec<String> =
-                            result_line.split(',').map(|s| s.to_string()).collect();
-                        line_splits[1] = put.author;
-                        line_splits[2] = put.message;
-                        line_splits[3] = put.likes.to_string();
-                        if let Some(image) = put.image {
-                            line_splits[4] = image;
-                        }
-                        // rejoin the line
-                        result_line = line_splits.join(",");
-                    }
-                } else {
-                    puts_deletes.push_front(update);
-                }
-            }
-        }
-
-        let cached_post_line = read_cached_post
+        let Some(cached_post_line) = read_cached_post
             .take()
-            .or(cached_posts_reader.next().map(|l| l.unwrap()));
-        let Some(cached_post_line) = cached_post_line else {
-            writeln!(final_writer, "{}", result_line).unwrap();
-            // TODO: If there are mutation updates left keep applying it to the results before break here
+            .or(cached_posts_reader.next().map(|l| l.unwrap()))
+        else {
+            // There is no more cached post line to read, so we should write the result line (if not marked for deletion)
+            // and break out of the loop to write the remaining `result_line` lines
+
+            if !mark_result_line_for_deletion {
+                writeln!(final_writer, "{}", result_line).unwrap();
+            }
             break;
         };
 
@@ -334,21 +306,110 @@ fn merge(state: &Arc<State>) {
     }
 
     // write the remaining lines
-    if let Some(l) = read_result {
-        writeln!(final_writer, "{}", l).unwrap();
+
+    if let Some(mut result_line) = read_result.take() {
+        let mark_result_line_for_deletion = update_post_line_with_put_delete(
+            &mut should_update_results,
+            &mut puts_deletes,
+            state,
+            &mut result_line,
+        );
+        if !mark_result_line_for_deletion {
+            writeln!(final_writer, "{}", result_line).unwrap();
+        }
     }
+    for result_line in results_reader {
+        let mut result_line = result_line.unwrap();
+        let mark_result_line_for_deletion = update_post_line_with_put_delete(
+            &mut should_update_results,
+            &mut puts_deletes,
+            state,
+            &mut result_line,
+        );
+        if !mark_result_line_for_deletion {
+            writeln!(final_writer, "{}", result_line).unwrap();
+        }
+    }
+
     if let Some(l) = read_cached_post {
         writeln!(final_writer, "{}", l).unwrap();
     }
     for line in cached_posts_reader {
         writeln!(final_writer, "{}", line.unwrap()).unwrap();
     }
-    for line in results_reader {
-        writeln!(final_writer, "{}", line.unwrap()).unwrap();
-    }
 
     // replace `results.csv` with `merged.csv`
     std::fs::rename(merge_file_name, state.result_csv_name).unwrap();
+}
+
+/// Update the passed in `result_line` by mutating it if there is a put update for it.
+/// Returns `true` if the `result_line` should be deleted.
+fn update_post_line_with_put_delete(
+    should_update_results: &mut bool,
+    puts_deletes: &mut VecDeque<PutDeleteUpdate>,
+    state: &Arc<State>,
+    result_line: &mut String,
+) -> bool {
+    let mut mark_result_line_for_deletion = false;
+    if *should_update_results {
+        if puts_deletes.is_empty() {
+            // load puts and deletes file
+            match state.cache_number_list.lock().unwrap().pop_front() {
+                Some(n) => {
+                    let file_name = put_delete_file_name(n);
+                    let file = std::fs::File::open(file_name).unwrap();
+                    let content: Vec<PutDeleteUpdate> = bincode::deserialize_from(file).unwrap();
+                    puts_deletes.extend(content);
+                }
+                None => {
+                    *should_update_results = false;
+                }
+            }
+        }
+        // apply update here
+        if let Some(update) = puts_deletes.pop_front() {
+            if update.uuid == result_line.split(',').next().unwrap() {
+                let ApplyUpdateResult {
+                    mark_delete,
+                    constructed_line,
+                } = apply_update_to_result_line(update, &*result_line);
+                mark_result_line_for_deletion = mark_delete;
+                if let Some(constructed_line) = constructed_line {
+                    *result_line = constructed_line;
+                }
+            } else {
+                // push it to the front if it is not the update we want
+                puts_deletes.push_front(update);
+            }
+        }
+    }
+    mark_result_line_for_deletion
+}
+
+struct ApplyUpdateResult {
+    mark_delete: bool,
+    constructed_line: Option<String>,
+}
+
+fn apply_update_to_result_line(update: PutDeleteUpdate, result_line: &String) -> ApplyUpdateResult {
+    let mut result = ApplyUpdateResult {
+        constructed_line: None,
+        mark_delete: update.delete,
+    };
+
+    if let Some(put) = update.put {
+        let mut line_splits: Vec<String> = result_line.split(',').map(|s| s.to_string()).collect();
+        line_splits[1] = put.author;
+        line_splits[2] = put.message;
+        line_splits[3] = put.likes.to_string();
+        if let Some(image) = put.image {
+            line_splits[4] = image;
+        }
+        // construct the updated line
+        result.constructed_line = Some(line_splits.join(","));
+    }
+
+    result
 }
 
 /// serde Value that can be Absent, Null, or Value(T)
