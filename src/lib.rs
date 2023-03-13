@@ -350,10 +350,9 @@ fn update_post_line_with_put_delete(
     state: &Arc<State>,
     result_line: &mut String,
 ) -> bool {
-    let mut mark_result_line_for_deletion = false;
     if *should_update_results {
         if puts_deletes.is_empty() {
-            // load puts and deletes file
+            // load more put and delete updates
             match state.cache_number_list.lock().unwrap().pop_front() {
                 Some(n) => {
                     let file_name = put_delete_file_name(n);
@@ -362,54 +361,49 @@ fn update_post_line_with_put_delete(
                     puts_deletes.extend(content);
                 }
                 None => {
+                    // there is no more put or delete update
                     *should_update_results = false;
                 }
             }
         }
-        // apply update here
+
+        // apply update here if there is one for this result line
         if let Some(update) = puts_deletes.pop_front() {
-            if update.uuid == result_line.split(',').next().unwrap() {
-                let ApplyUpdateResult {
-                    mark_delete,
-                    constructed_line,
-                } = apply_update_to_result_line(update, &*result_line);
-                mark_result_line_for_deletion = mark_delete;
-                if let Some(constructed_line) = constructed_line {
-                    *result_line = constructed_line;
-                }
-            } else {
-                // push it to the front if it is not the update we want
+            if update.uuid != result_line.split(',').next().unwrap() {
+                // push it back to the front if it is not the update we want
                 puts_deletes.push_front(update);
+                return false;
             }
+
+            if update.delete {
+                // this is a delete update
+                return true;
+            }
+
+            // this is a put update
+
+            // there has to be a put update here so we can just unwrap
+            let put = update.put.unwrap();
+
+            // construct the new line
+            let without_image: [String; 5] = [
+                update.uuid,
+                put.author,
+                put.message,
+                put.likes.to_string(),
+                match put.image {
+                    Some(new_image) => new_image,
+                    None => result_line.split(',').last().unwrap().to_string(),
+                },
+            ];
+            let updated_result_line = without_image.join(",");
+
+            // replace the old result line with the new updated line
+            *result_line = updated_result_line;
         }
     }
-    mark_result_line_for_deletion
-}
 
-struct ApplyUpdateResult {
-    mark_delete: bool,
-    constructed_line: Option<String>,
-}
-
-fn apply_update_to_result_line(update: PutDeleteUpdate, result_line: &String) -> ApplyUpdateResult {
-    let mut result = ApplyUpdateResult {
-        constructed_line: None,
-        mark_delete: update.delete,
-    };
-
-    if let Some(put) = update.put {
-        let mut line_splits: Vec<String> = result_line.split(',').map(|s| s.to_string()).collect();
-        line_splits[1] = put.author;
-        line_splits[2] = put.message;
-        line_splits[3] = put.likes.to_string();
-        if let Some(image) = put.image {
-            line_splits[4] = image;
-        }
-        // construct the updated line
-        result.constructed_line = Some(line_splits.join(","));
-    }
-
-    result
+    false
 }
 
 /// serde Value that can be Absent, Null, or Value(T)
