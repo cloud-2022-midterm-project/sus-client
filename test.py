@@ -7,17 +7,8 @@ import app
 from remove_non_results_files import remove_non_results_files
 
 
-def wait(prompt="Press any key to continue..."):
-    # Check if the operating system is Windows
-    if os.name == 'nt':
-        # For Windows, use the msvcrt module to get a keypress
-        import msvcrt
-        print(prompt)
-        msvcrt.getch()
-    else:
-        # For Unix-based systems, use a simple terminal command
-        prompt += '\n'
-        os.system(f"read -n 1 -s -r -p '{prompt}'")
+def wait(prompt="Press enter to continue..."):
+    input(prompt)
 
 
 ids = {
@@ -317,7 +308,7 @@ def tests(base_url, flows):
 
         if i != len(flows):
             wait(
-                f'Checkpoint {i} reached, check result, press any key to continue...')
+                f'Checkpoint {i} reached, check result, press enter to continue...')
         else:
             print('Finished testing')
 
