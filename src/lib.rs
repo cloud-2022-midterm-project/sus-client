@@ -33,7 +33,7 @@ fn app(_py: Python, m: &PyModule) -> PyResult<()> {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct PaginationMetadata {
+struct PaginationMetadata {
     total_pages: usize,
     kind: PaginationType,
 }
@@ -57,9 +57,9 @@ impl FromStr for PaginationType {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct DbResults {
-    pub page_number: usize,
-    pub messages: Vec<CompleteMessage>,
+struct DbResults {
+    page_number: usize,
+    messages: Vec<CompleteMessage>,
 }
 
 struct State {
@@ -105,12 +105,12 @@ fn trigger_pagination(url: &str) -> PaginationMetadata {
 }
 
 #[derive(Serialize, Debug, Deserialize)]
-pub struct CompleteMessage {
-    pub uuid: String,
-    pub author: String,
-    pub message: String,
-    pub likes: i32,
-    pub image: Option<String>,
+struct CompleteMessage {
+    uuid: String,
+    author: String,
+    message: String,
+    likes: i32,
+    image: Option<String>,
 }
 
 impl CompleteMessage {
@@ -129,26 +129,26 @@ impl CompleteMessage {
 
 #[derive(Serialize, Debug, Deserialize)]
 /// The update that the client sees.
-pub struct ClientPutUpdate {
-    pub author: String,
-    pub message: String,
-    pub likes: i32,
-    pub image: Option<String>,
+struct ClientPutUpdate {
+    author: String,
+    message: String,
+    likes: i32,
+    image: Option<String>,
 }
 
 #[derive(Serialize, Debug, Deserialize)]
-pub struct PutDeleteUpdate {
+struct PutDeleteUpdate {
     uuid: String,
     put: Option<ClientPutUpdate>,
     delete: bool,
 }
 
 #[derive(Serialize, Debug, Deserialize)]
-pub struct MutationResults {
-    pub posts: Vec<CompleteMessage>,
-    pub puts_deletes: Vec<PutDeleteUpdate>,
-    pub done: bool,
-    pub page_number: usize,
+struct MutationResults {
+    posts: Vec<CompleteMessage>,
+    puts_deletes: Vec<PutDeleteUpdate>,
+    done: bool,
+    page_number: usize,
 }
 
 fn post_file_name(n: usize) -> String {
