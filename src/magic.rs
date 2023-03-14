@@ -21,7 +21,7 @@ pub(crate) fn get_all_pagination(base_url: String, num_workers: usize) {
         get_page_url: format!("{base_url}/get-page"),
         meta,
         puts_deletes_file_numbers: Mutex::new(BTreeSet::new()),
-        posts_file_names: Mutex::new(BTreeSet::new()),
+        posts_file_numbers: Mutex::new(BTreeSet::new()),
     });
 
     // a special case flag for the first sync operation
@@ -61,12 +61,13 @@ fn get_page_and_process(state: Arc<State>, first_sync: bool, total_pages: usize)
         PaginationType::Fresh => {
             let res: DbResults = bincode::deserialize(&body_bytes).unwrap();
 
-            let post_file_name = post_file_name(res.page_number);
             state
-                .posts_file_names
+                .posts_file_numbers
                 .lock()
                 .unwrap()
-                .insert(post_file_name.clone());
+                .insert(res.page_number);
+
+            let post_file_name = post_file_name(res.page_number);
             write_posts_csv(&post_file_name, res.messages);
 
             let mut pages_fetched = state.pages_fetched.lock().unwrap();
@@ -80,12 +81,13 @@ fn get_page_and_process(state: Arc<State>, first_sync: bool, total_pages: usize)
         PaginationType::Cache => {
             let res: MutationResults = bincode::deserialize(&body_bytes).unwrap();
 
-            let post_file_name = post_file_name(res.page_number);
             state
-                .posts_file_names
+                .posts_file_numbers
                 .lock()
                 .unwrap()
-                .insert(post_file_name.clone());
+                .insert(res.page_number);
+
+            let post_file_name = post_file_name(res.page_number);
             write_posts_csv(&post_file_name, res.posts);
 
             let mut pages_fetched = state.pages_fetched.lock().unwrap();
@@ -252,7 +254,7 @@ pub(crate) struct State {
     pub(crate) get_page_url: String,
     pub(crate) meta: PaginationMetadata,
     pub(crate) puts_deletes_file_numbers: Mutex<BTreeSet<usize>>,
-    pub(crate) posts_file_names: Mutex<BTreeSet<String>>,
+    pub(crate) posts_file_numbers: Mutex<BTreeSet<usize>>,
 }
 
 impl State {
@@ -265,9 +267,9 @@ impl State {
                 .open(to)
                 .unwrap(),
         );
-        let mut file_names = self.posts_file_names.lock().unwrap();
-        while let Some(file_name) = file_names.pop_first() {
-            let mut post = BufReader::new(File::open(file_name).unwrap()).lines();
+        let mut file_names = self.posts_file_numbers.lock().unwrap();
+        while let Some(file_num) = file_names.pop_first() {
+            let mut post = BufReader::new(File::open(post_file_name(file_num)).unwrap()).lines();
             while let Some(line) = post.next().map(|l| l.unwrap()) {
                 writeln!(writer, "{}", line).unwrap();
             }
@@ -301,8 +303,8 @@ impl State {
 
         // check if we we have any cached post updates that we need to merge with the old result lines
         // if not we can just skip the main merge loop entirely
-        let mut cached_post_file_names = self.posts_file_names.lock().unwrap();
-        let Some(cached_file_name) = cached_post_file_names.pop_first() else {
+        let mut post_file_numbers = self.posts_file_numbers.lock().unwrap();
+        let Some(post_file_num) = post_file_numbers.pop_first() else {
             // we don't have any cached post updates so we can just write the remaining old result lines
             // while applying any put or delete updates
             for mut result_line in results_reader.map(Result::unwrap).map(ReadResultLine::new) {
@@ -329,7 +331,7 @@ impl State {
         let mut cached_posts_reader = BufReader::new(
             OpenOptions::new()
                 .read(true)
-                .open(cached_file_name)
+                .open(post_file_name(post_file_num))
                 .unwrap(),
         )
         .lines();
@@ -375,11 +377,14 @@ impl State {
                     None => {
                         // we have reached the end of this current cached post file
                         // load the next post cached file if there is more
-                        match cached_post_file_names.pop_first() {
-                            Some(file_name) => {
+                        match post_file_numbers.pop_first() {
+                            Some(post_file_num) => {
                                 // we still have more post cached file to load
                                 cached_posts_reader = BufReader::new(
-                                    OpenOptions::new().read(true).open(file_name).unwrap(),
+                                    OpenOptions::new()
+                                        .read(true)
+                                        .open(post_file_name(post_file_num))
+                                        .unwrap(),
                                 )
                                 .lines();
                                 // read the first line of the new cached post file
