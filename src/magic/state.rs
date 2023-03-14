@@ -63,7 +63,7 @@ impl State {
     pub(crate) fn merge(&self) {
         println!("Merging results...");
 
-        // create a new filed called `final.csv` even if it exists
+        // create a new file for the merge result
         let mut final_writer = BufWriter::new(
             OpenOptions::new()
                 .create(true)
@@ -71,7 +71,8 @@ impl State {
                 .open(MERGE_FILE_NAME)
                 .unwrap(),
         );
-        // open the `results.csv` file
+
+        // open the previous sync results file
         let mut results_reader =
             BufReader::new(OpenOptions::new().read(true).open(RESULT_CSV_NAME).unwrap()).lines();
 
