@@ -17,11 +17,10 @@ pub(crate) fn get_all_pagination(base_url: String, num_workers: usize) {
 
     // create a state object that will be shared between threads
     let state = Arc::new(State {
-        cache_number: Mutex::new(0),
         pages_fetched: Mutex::new(0),
         get_page_url: format!("{base_url}/get-page"),
         meta,
-        cache_number_list: Mutex::new(VecDeque::with_capacity(total_pages)),
+        puts_deletes_file_numbers: Mutex::new(BTreeSet::new()),
         posts_file_names: Mutex::new(BTreeSet::new()),
     });
 
@@ -104,17 +103,14 @@ fn get_page_and_process(state: Arc<State>, first_sync: bool, total_pages: usize)
             drop(pages_fetched);
 
             if !res.puts_deletes.is_empty() {
-                let cache_num;
-                {
-                    let mut cache_number = state.cache_number.lock().unwrap();
-                    *cache_number += 1;
-                    cache_num = *cache_number;
-                }
-                state.cache_number_list.lock().unwrap().push_back(cache_num);
+                state
+                    .puts_deletes_file_numbers
+                    .lock()
+                    .unwrap()
+                    .insert(res.page_number);
 
-                // create a new file called `cached_mutations_{}.csv`
-                let file_name = put_delete_file_name(cache_num);
-                // dump puts deletes to the file
+                // create a new file for put/delete mutations of this page
+                let file_name = put_delete_file_name(res.page_number);
                 let encoded = bincode::serialize(&res.puts_deletes).unwrap();
                 std::fs::write(file_name, encoded).unwrap();
             }
@@ -252,11 +248,10 @@ impl ReadResultLine {
 }
 
 pub(crate) struct State {
-    pub(crate) cache_number: Mutex<usize>,
     pub(crate) pages_fetched: Mutex<usize>,
     pub(crate) get_page_url: String,
     pub(crate) meta: PaginationMetadata,
-    pub(crate) cache_number_list: Mutex<VecDeque<usize>>,
+    pub(crate) puts_deletes_file_numbers: Mutex<BTreeSet<usize>>,
     pub(crate) posts_file_names: Mutex<BTreeSet<String>>,
 }
 
@@ -302,7 +297,7 @@ impl State {
         let mut puts_deletes = VecDeque::new();
 
         // a flag to indicate if we should look for a put or delete update for the current result line
-        let mut should_update_results = !self.cache_number_list.lock().unwrap().is_empty();
+        let mut should_update_results = !self.puts_deletes_file_numbers.lock().unwrap().is_empty();
 
         // check if we we have any cached post updates that we need to merge with the old result lines
         // if not we can just skip the main merge loop entirely
@@ -477,7 +472,7 @@ impl State {
         if *should_update_results {
             if puts_deletes.is_empty() {
                 // load more put and delete updates
-                match self.cache_number_list.lock().unwrap().pop_front() {
+                match self.puts_deletes_file_numbers.lock().unwrap().pop_first() {
                     Some(n) => {
                         let file_name = put_delete_file_name(n);
                         let file = std::fs::File::open(file_name).unwrap();
