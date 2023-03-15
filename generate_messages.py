@@ -8,9 +8,9 @@ import os
 
 
 def generate_messages(num_xl, num_small, base_url, workers):
-    with open('./data/52.json', 'r') as f:
+    with open('./Data/52.json', 'r') as f:
         big = json.load(f)
-    with open('./data/3.json', 'r') as f:
+    with open('./Data/3.json', 'r') as f:
         small = json.load(f)
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
