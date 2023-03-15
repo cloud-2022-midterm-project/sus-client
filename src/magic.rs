@@ -269,10 +269,13 @@ impl State {
         );
         let mut file_names = self.posts_file_numbers.lock().unwrap();
         while let Some(file_num) = file_names.pop_first() {
-            let mut post = BufReader::new(File::open(post_file_name(file_num)).unwrap()).lines();
+            let post_file_name = post_file_name(file_num);
+            let mut post = BufReader::new(File::open(&post_file_name).unwrap()).lines();
             while let Some(line) = post.next().map(|l| l.unwrap()) {
                 writeln!(writer, "{}", line).unwrap();
             }
+            // remove the used file
+            std::fs::remove_file(post_file_name).unwrap();
         }
     }
 
@@ -327,11 +330,13 @@ impl State {
             return;
         };
 
+        let mut current_post_file_num = post_file_num;
+
         // we have at least one cached post file to merge with the old results
         let mut cached_posts_reader = BufReader::new(
             OpenOptions::new()
                 .read(true)
-                .open(post_file_name(post_file_num))
+                .open(post_file_name(current_post_file_num))
                 .unwrap(),
         )
         .lines();
@@ -375,10 +380,13 @@ impl State {
                 None => match cached_posts_reader.next() {
                     Some(l) => l.unwrap(),
                     None => {
+                        // remove this used file
+                        std::fs::remove_file(post_file_name(current_post_file_num)).unwrap();
                         // we have reached the end of this current cached post file
                         // load the next post cached file if there is more
                         match post_file_numbers.pop_first() {
                             Some(post_file_num) => {
+                                current_post_file_num = post_file_num;
                                 // we still have more post cached file to load
                                 cached_posts_reader = BufReader::new(
                                     OpenOptions::new()
