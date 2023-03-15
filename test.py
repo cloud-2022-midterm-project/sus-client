@@ -320,19 +320,19 @@ def send_flow(base_url, flow):
             if r.status_code != expected_status_code:
                 print(
                     f'Expected {expected_status_code}, got {r.status_code}. \
-{op=}\n{data}\n{r.text}')
+op={op}\n{data}\n{r.text}')
         elif op == 'put':
             r = requests.put(f'{base_url}/{data["uuid"]}', json=data)
             if r.status_code != expected_status_code:
                 print(
                     f'Expected {expected_status_code}, got {r.status_code}. \
-{op=}\n{data}\n{r.text}')
+op={op}\n{data}\n{r.text}')
         elif op == 'delete':
             r = requests.delete(f'{base_url}/{data["uuid"]}')
             if r.status_code != expected_status_code:
                 print(
                     f'Expected {expected_status_code}, got {r.status_code}. \
-{op=}\n{data}\n{r.text}')
+op={op}\n{data}\n{r.text}')
         else:
             print(f'Unknown operation: {op}')
 
