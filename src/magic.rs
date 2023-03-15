@@ -183,18 +183,14 @@ pub(crate) struct CompleteMessage {
     pub(crate) author: String,
     pub(crate) message: String,
     pub(crate) likes: i32,
-    pub(crate) image: Option<String>,
+    pub(crate) image: String,
 }
 
 impl CompleteMessage {
     pub(crate) fn into_csv_row(self) -> String {
         let row = format!(
             "{},{},{},{},{}",
-            self.uuid,
-            self.author,
-            self.message,
-            self.likes,
-            self.image.unwrap_or("".to_string())
+            self.uuid, self.author, self.message, self.likes, self.image
         );
         row
     }
